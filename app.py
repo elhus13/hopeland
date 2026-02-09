@@ -46,7 +46,7 @@ if prompt := st.chat_input("메시지를 입력하세요..."):
         try:
             # Claude에게 질문 던지기
             response = client.messages.create(
-                model="claude-3-5-sonnet-20240620", # 가장 똑똑한 모델
+                model="claude-3-haiku-20240307", # 가장 가벼운 모델
                 max_tokens=1000,
                 messages=[
                     {"role": m["role"], "content": m["content"]}
