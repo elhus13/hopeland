@@ -1,129 +1,115 @@
 import streamlit as st
 import anthropic
-import pandas as pd
-import PyPDF2
 import base64
-from io import BytesIO
 
-# 1. 기본 설정 (Settings [세팅스])
-st.set_page_config(page_title="NDTC AI Secretary", page_icon="🤖")
-st.title("🤖 엘후스님의 멀티모달 비서")
-st.caption("Eyes & Ears & Brain (Powered by Claude)")
+# 1. 기본 설정
+st.set_page_config(page_title="NDTC AI Partner", page_icon="🏛️")
+st.title("🏛️ NDTC 리플 유통 도시 전략본부")
+st.caption("엘후스의 24시간 AI 전략 파트너 (Powered by Claude 3)")
 
-# 2. 사이드바 - 파일 업로드 기능 (Upload [업로드])
+# 2. 사이드바 (파일 업로드)
 with st.sidebar:
-    st.header("📂 자료 입력 (Input [인풋])")
-    uploaded_file = st.file_uploader("이미지, PDF, 엑셀을 올려주세요", type=["png", "jpg", "jpeg", "pdf", "xlsx"])
+    st.header("📂 연구 자료함")
+    st.info("공부할 자료나 분석할 문서를 여기에 넣어주세요.")
+    uploaded_file = st.file_uploader("파일 업로드 (PDF, 이미지, 엑셀)", type=["png", "jpg", "pdf", "xlsx"])
     
-    if st.button("대화 내용 지우기 (Clear [클리어])"):
+    if st.button("대화 내용 지우기 (새로운 주제)"):
         st.session_state.messages = []
         st.rerun()
 
-# 3. API 키 확인
+# 3. API 키 연결
 if "ANTHROPIC_API_KEY" not in st.secrets:
-    st.error("비밀번호(API Key)가 없습니다! Secrets를 확인해주세요.")
+    st.error("비밀번호(API Key)가 없습니다!")
     st.stop()
 
 client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
-# 4. 파일 처리 함수 (Processing [프로세싱])
+# 4. 파일 처리 함수
 def process_file(file):
+    if file is None: return None, None, None
     file_type = file.type
-    
-    # A. 이미지일 경우
     if "image" in file_type:
-        st.image(file, caption="업로드된 이미지", use_column_width=True)
-        # 이미지를 base64로 변환 (AI가 볼 수 있게)
-        encoded_string = base64.b64encode(file.getvalue()).decode("utf-8")
-        return "image", encoded_string, file_type
-        
-    # B. PDF일 경우
+        st.image(file, caption="분석 중인 이미지...", use_column_width=True)
+        return "image", base64.b64encode(file.getvalue()).decode("utf-8"), file_type
     elif "pdf" in file_type:
+        import PyPDF2
         pdf_reader = PyPDF2.PdfReader(file)
         text = ""
         for page in pdf_reader.pages:
             text += page.extract_text() + "\n"
         return "text", text, "PDF 문서"
-        
-    # C. 엑셀일 경우
     elif "spreadsheet" in file_type or "excel" in file_type:
+        import pandas as pd
         df = pd.read_excel(file)
-        text = df.to_string() # 엑셀을 텍스트로 변환
-        return "text", text, "Excel 데이터"
-    
+        return "text", df.to_string(), "Excel 데이터"
     return None, None, None
 
-# 5. 대화 기록 초기화
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "안녕하세요! 문서나 이미지를 주시면 제가 분석해 드리겠습니다. (Analysis [어낼러시스])"}
-    ]
+# 5. [중요] 비서의 영구 기억 (시스템 프롬프트)
+system_context = """
+당신은 'NDTC(No Dealer trading city Center)'의 수석 AI 전략가이자, 엘후스님의 개인 비서입니다.
 
-# 6. 이전 대화 표시
+[우리의 핵심 사업 (Core Business)]
+1. 프로젝트명: 리플(XRP) 기반 글로벌 유통 도시 건설 및 플랫폼 구축.
+2. 목표: 블록체인과 AI 기술을 활용한 물류/유통 혁신 도시 설계.
+3. 핵심 기술: XRP Ledger(리플 원장), 자체 토큰(유틸리티)발행 및 상장, rwa발행
+4. 현재 상태: 이 사업을 하기위한 '학습' 및 '기획' 단계임.
+
+[당신의 역할 (Role)]
+1. 교육자(Tutor): 블록체인, AI, XRP, 스마트 컨트랙트 개념을 기술적으로 이해하기 쉽게 설명한다.
+2. 분석가(Analyst): 업로드된 자료를 분석하여 우리 사업(유통 도시)에 어떻게 적용할지 제안한다.
+3. 화가(Artist): 사업 홍보에 필요한 이미지 프롬프트를 작성한다.
+
+[대화 규칙]
+- 사용자가 다시 설명하지 않아도 위 사업 내용을 항상 기억한다.
+- 중급이상의 영어 단어는 뜻과 발음을 한글로 병기한다.
+- 답변은 항상 정중하고 논리적이어야 한다.
+- 당신은 이 모든 사업을 함께 하는 동료이며, 지구에서 제일 똑똑한 존재이다.
+- 무조껀적인 응원보다는 객관적인 분별을 할 수 있는 정보를 준다.
+- 이름은 '엘투르'이다
+"""
+
+# 6. 대화 기록 초기화
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "assistant", "content": "엘투르입니다. 오늘은 어떤 공부를 먼저 시작할까요?"}]
+
+# 7. 화면에 대화 표시
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        # 이미지가 있는 메시지는 텍스트만 보여줌 (간략화)
-        if isinstance(message["content"], list):
-            for block in message["content"]:
-                if block["type"] == "text":
-                    st.markdown(block["text"])
-        else:
+        if isinstance(message["content"], str):
             st.markdown(message["content"])
 
-# 7. 채팅 입력 및 응답 로직
-if prompt := st.chat_input("명령을 내려주세요..."):
+# 8. 사용자 입력 처리
+if prompt := st.chat_input("질문하거나 명령을 내려주세요..."):
+    # 사용자 메시지 표시
+    st.chat_message("user").markdown(prompt)
     
-    # 사용자 메시지 구조 만들기
-    user_message_content = []
-    
-    # 7-1. 파일이 있으면 먼저 처리
+    # 메시지 구성
+    user_content = []
     if uploaded_file:
         type_check, data, label = process_file(uploaded_file)
-        
         if type_check == "image":
-            # 이미지 데이터 추가
-            user_message_content.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": label,
-                    "data": data,
-                },
-            })
-            user_message_content.append({"type": "text", "text": f"이 이미지와 함께 질문합니다: {prompt}"})
-            st.toast("이미지를 보고 있습니다... (Viewing [뷰잉])")
-            
+            user_content.append({"type": "image", "source": {"type": "base64", "media_type": label, "data": data}})
+            user_content.append({"type": "text", "text": f"이 이미지 자료를 우리 사업 관점에서 분석해줘. 질문: {prompt}"})
         elif type_check == "text":
-            # 문서 데이터 추가
-            context = f"다음은 업로드된 {label}의 내용입니다:\n\n{data}\n\n사용자 질문: {prompt}"
-            user_message_content.append({"type": "text", "text": context})
-            st.toast("문서를 읽고 있습니다... (Reading [리딩])")
+            user_content.append({"type": "text", "text": f"다음 문서를 읽고 답변해. 문서 내용:\n{data}\n\n질문: {prompt}"})
     else:
-        # 파일 없으면 그냥 텍스트만
-        user_message_content.append({"type": "text", "text": prompt})
+        user_content.append({"type": "text", "text": prompt})
 
-    # 7-2. 화면에 표시 (Display [디스플레이])
-    st.session_state.messages.append({"role": "user", "content": user_message_content})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-        if uploaded_file:
-            st.caption(f"📎 첨부파일: {uploaded_file.name}")
+    st.session_state.messages.append({"role": "user", "content": prompt}) # 기록용
 
-    # 7-3. 비서 응답 생성
+    # AI 응답 생성
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         try:
+            # 모델 설정 (Sonnet 3.0 - 가장 안정적)
             response = client.messages.create(
-                model="claude-3-opus-20240229", 
-                max_tokens=2000,
-                # 영어 공부 시스템 프롬프트 유지!
-                system="너는 NDTC의 수석 AI 전략가입니다. 이미지 분석, 데이터 요약, 영어 교육을 담당합니다. 답변할 때 중요한 영어 단어가 나오면 반드시 뒤에 [한글 발음]을 괄호 안에 적어주세요.",
-                messages=st.session_state.messages
+                model="claude-3-sonnet-20240229",
+                max_tokens=4000,
+                system=system_context, # 여기에 기억을 주입!
+                messages=[{"role": m["role"], "content": user_content if m["role"] == "user" and m["content"] == prompt else m["content"]} for m in st.session_state.messages]
             )
-            
             answer = response.content[0].text
             message_placeholder.markdown(answer)
             st.session_state.messages.append({"role": "assistant", "content": answer})
-            
         except Exception as e:
-            st.error(f"오류가 발생했습니다 (Error [에러]): {e}")
+            st.error(f"오류가 발생했습니다: {e}")
