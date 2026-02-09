@@ -103,7 +103,7 @@ if prompt := st.chat_input("질문하거나 명령을 내려주세요..."):
         try:
             # 모델 설정 (Sonnet 3.0 - 가장 안정적)
             response = client.messages.create(
-                model="claude-3-sonnet-20240229",
+                model="claude-3-haiku-20240307",
                 max_tokens=4000,
                 system=system_context, # 여기에 기억을 주입!
                 messages=[{"role": m["role"], "content": user_content if m["role"] == "user" and m["content"] == prompt else m["content"]} for m in st.session_state.messages]
