@@ -1,26 +1,65 @@
 import streamlit as st
+import anthropic
 
-# 1. 제목 설정
-st.title("🤖 엘후스의 AI 개인 비서")
-st.caption("Personal AI Agent Playground")
+# 1. 기본 설정
+st.set_page_config(page_title="NDTC AI Secretary", page_icon="🤖")
+st.title("🤖 엘후스님의 AI 비서 (Powered by Claude)")
 
-# 2. 사이드바 (메뉴)
+# 2. 사이드바 (옵션)
 with st.sidebar:
-    st.header("설정 (Settings)")
-    mode = st.radio("모드 선택", ["일반 대화", "NDTC 시장 분석", "영어 공부"])
+    st.header("설정")
+    st.write("NDTC Central Control")
+    if st.button("대화 내용 지우기"):
+        st.session_state.messages = []
+        st.rerun()
 
-# 3. 메인 화면
-st.write("반갑습니다! 이곳은 엘후스님의 개인 연구 공간입니다.")
+# 3. API 키 확인 (금고에서 꺼내기)
+if "ANTHROPIC_API_KEY" not in st.secrets:
+    st.error("비밀번호(API Key)가 설정되지 않았습니다! Secrets를 확인해주세요.")
+    st.stop()
 
-if mode == "일반 대화":
-    st.info("현재 '일반 대화' 모드입니다. 무엇이든 물어보세요.")
-elif mode == "NDTC 시장 분석":
-    st.warning("경고: 아직 실시간 데이터가 연결되지 않았습니다.")
-    st.line_chart([10, 20, 15, 25, 30]) # 가짜 차트 예시
+# 클라이언트 생성
+client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
-# 4. 입력창
-user_input = st.chat_input("비서에게 명령을 내려주세요...")
+# 4. 대화 기록 초기화
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "안녕하세요, 엘후스님! 무엇을 도와드릴까요?"}
+    ]
 
-if user_input:
-    st.write(f"엘후스님: {user_input}")
-    st.write("비서: (아직 뇌가 연결되지 않았습니다. 곧 연결해 드릴게요!)")
+# 5. 이전 대화 화면에 표시
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# 6. 채팅 입력 및 응답 로직
+if prompt := st.chat_input("메시지를 입력하세요..."):
+    # 유저 메시지 표시
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # 비서 응답 생성
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        
+        try:
+            # Claude에게 질문 던지기
+            response = client.messages.create(
+                model="claude-3-5-sonnet-20240620", # 가장 똑똑한 모델
+                max_tokens=1000,
+                messages=[
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages
+                ]
+            )
+            
+            # 응답 받아서 표시
+            answer = response.content[0].text
+            message_placeholder.markdown(answer)
+            
+            # 대화 기록에 저장
+            st.session_state.messages.append({"role": "assistant", "content": answer})
+            
+        except Exception as e:
+            st.error(f"에러가 발생했습니다: {e}")
