@@ -114,7 +114,7 @@ if prompt := st.chat_input("명령을 내려주세요..."):
         message_placeholder = st.empty()
         try:
             response = client.messages.create(
-                model="claude-3-5-sonnet-20240620", 
+                model="claude-3-opus-20240229", 
                 max_tokens=2000,
                 # 영어 공부 시스템 프롬프트 유지!
                 system="너는 NDTC의 수석 AI 전략가입니다. 이미지 분석, 데이터 요약, 영어 교육을 담당합니다. 답변할 때 중요한 영어 단어가 나오면 반드시 뒤에 [한글 발음]을 괄호 안에 적어주세요.",
