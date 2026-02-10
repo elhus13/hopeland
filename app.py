@@ -4,7 +4,7 @@ import base64
 
 # 1. 기본 설정
 st.set_page_config(page_title="NDTC AI Partner", page_icon="🏛️")
-st.title("🏛️엘후스의 24시간 AI 전략 파트너")
+st.title("🏛️NDTC 24시간 AI 전략 파트너")
 st.caption("엘후스의 24시간 AI 전략 파트너 (Powered by Claude 3)")
 
 # 2. 사이드바 (파일 업로드)
