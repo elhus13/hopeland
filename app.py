@@ -9,13 +9,12 @@ from openai import OpenAI
 from pinecone import Pinecone
 import docx
 from PIL import Image
-
+import PyPDF2  # PDF 처리를 위해 상단으로 이동
 
 # =========================================================
 # 1) 기본 설정
 # =========================================================
 st.set_page_config(page_title="NDTC Team HQ", page_icon="🏙️", layout="wide")
-
 
 # =========================================================
 # 2) 로그인(간단 인증)
@@ -38,7 +37,9 @@ def login_screen():
         submitted = st.form_submit_button("입장하기")
 
         if submitted:
+            # secrets가 없을 경우를 대비한 기본값 처리
             valid_users = st.secrets.get("passwords", {"admin": "1234", "team": "ndtc2026"})
+            
             if user_id in valid_users and valid_users[user_id] == password:
                 st.session_state.logged_in = True
                 st.session_state.user_id = user_id
@@ -65,7 +66,7 @@ try:
     pinecone_key = st.secrets["PINECONE_API_KEY"]
     openai_key = st.secrets["OPENAI_API_KEY"]
 except Exception:
-    st.error("⚠️ API 키 설정 오류: Streamlit Secrets에 ANTHROPIC / PINECONE / OPENAI 키가 있는지 확인하세요.")
+    st.error("⚠️ API 키 설정 오류: .streamlit/secrets.toml 파일에 ANTHROPIC / PINECONE / OPENAI 키가 있는지 확인하세요.")
     st.stop()
 
 # Anthropic(Claude)
@@ -82,8 +83,6 @@ index = pc.Index(INDEX_NAME)
 
 # =========================================================
 # 4) 카테고리(한 칸에 설명 포함)
-#    - "실행/할일" 제거 요청 반영
-#    - 대화 로그 2종 추가
 # =========================================================
 CATEGORY_INFO = {
     "기술현황(Tech Scan)": "기술/툴/프로토콜 조사, 요약, 비교 자료",
@@ -114,7 +113,6 @@ def extract_text_from_txt(uploaded_file) -> str:
     return uploaded_file.read().decode("utf-8", errors="ignore")
 
 def extract_text_from_pdf(uploaded_file) -> str:
-    import PyPDF2
     reader = PyPDF2.PdfReader(uploaded_file)
     out = []
     for page in reader.pages:
@@ -148,44 +146,6 @@ def make_embedding(text: str):
     )
     return resp.data[0].embedding
 
-# =========================================================
-# 5-b) 공통 유틸: Claude 응답 이어받기 (Auto-continue)
-# =========================================================
-def get_full_response(messages, system_prompt):
-    """응답이 max_tokens에 의해 잘리면 자동으로 이어서 받아오는 함수"""
-    full_text = ""
-    max_rounds = 3  # 최대 3번까지 이어받기
-
-    # 원본 messages를 훼손하지 않도록 복사본 사용
-    working_messages = [m.copy() for m in messages]
-
-    for i in range(max_rounds):
-        response = claude.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=8192,
-            system=system_prompt,
-            messages=working_messages
-        )
-
-        chunk = response.content[0].text
-        full_text += chunk
-
-        # stop_reason 확인
-        # "end_turn" = 정상 완료 / "max_tokens" = 잘림
-        if response.stop_reason == "end_turn":
-            break
-
-        # 잘린 경우 → "이어서 작성해줘"를 자동 추가
-        working_messages.append({"role": "assistant", "content": chunk})
-        working_messages.append({
-            "role": "user",
-            "content": "이어서 작성해줘. 끊긴 부분부터 자연스럽게 계속."
-        })
-
-    return full_text
-
-
-
 
 # =========================================================
 # 6) Pinecone 저장(카테고리/로그 구분)
@@ -204,10 +164,7 @@ def upsert_to_pinecone(
 
     doc_id = str(uuid.uuid4())
 
-    # namespace 설계:
-    # - 대화 개인로그: chat_personal_{user_id}
-    # - 대화 업무로그: chat_team
-    # - 나머지 문서: docs
+    # namespace 설계
     if category == "대화 개인로그":
         namespace = f"chat_personal_{uploader}"
     elif category == "대화 업무로그":
@@ -225,7 +182,7 @@ def upsert_to_pinecone(
     if extra_meta:
         metadata.update(extra_meta)
 
-    # Pinecone 최신 SDK는 tuples 형태 upsert 지원
+    # Pinecone 최신 SDK upsert 방식
     index.upsert(
         vectors=[(doc_id, vector, metadata)],
         namespace=namespace,
@@ -343,7 +300,7 @@ if menu == "AI 전략 비서 (Chat)":
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
-    # 입력창: placeholder를 "Let's go" 로
+    # 입력창
     prompt = st.chat_input("Let's go")
     if prompt:
         st.session_state.last_user_prompt = prompt
@@ -372,7 +329,7 @@ if menu == "AI 전략 비서 (Chat)":
         except Exception:
             pass
 
-        # 2) 첨부 파일 텍스트 추출(질문에 포함)
+        # 2) 첨부 파일 텍스트 추출
         attachment_text_blocks = []
         if chat_files:
             for f in chat_files:
@@ -407,14 +364,15 @@ if menu == "AI 전략 비서 (Chat)":
 {knowledge_text if knowledge_text else "관련된 내부 자료가 없습니다. 일반 지식으로 답변하세요."}
 """
 
-        # 3) Claude 호출 (최신 Opus 4.6)
+        # 3) Claude 호출
         with st.chat_message("assistant"):
             ph = st.empty()
             try:
-                # Anthropic messages API 형식
+                # Anthropic messages API
+                # 참고: 2026년 기준 모델명은 실제 사용 가능한 모델로 조정 필요 (claude-3-5-sonnet 등)
                 resp = claude.messages.create(
-                    model="claude-opus-4-6",
-                    max_tokens=8192,
+                    model="claude-3-5-sonnet-20240620", 
+                    max_tokens=2000,
                     system=system_context,
                     messages=[
                         {"role": "user", "content": final_prompt}
@@ -422,7 +380,7 @@ if menu == "AI 전략 비서 (Chat)":
                 )
                 answer = resp.content[0].text
 
-                # 참고 문서 표시(선택)
+                # 참고 문서 표시
                 if knowledge_text:
                     answer += "\n\n---\n📚 **참고한 내부 자료:**\n"
                     try:
@@ -442,7 +400,7 @@ if menu == "AI 전략 비서 (Chat)":
 
 
 # =========================================================
-# 9) 지식 도서관 (자료 저장) - 멀티 업로드 + 카테고리 설명 한 칸
+# 9) 지식 도서관 (자료 저장)
 # =========================================================
 elif menu == "지식 도서관 (자료 저장)":
     st.header("📚 NDTC 지식 저장소")
