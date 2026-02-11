@@ -184,24 +184,28 @@ elif menu == "지식 도서관 (자료 저장)":
     st.info("여러 파일을 한 번에 선택해서, 같은 카테고리로 일괄 저장합니다.")
 
     with st.form("upload_form", clear_on_submit=False):
-        uploaded_files = st.file_uploader("파일 선택 (여러 개 가능)", type=["pdf", "txt", "docx", "png", "jpg", "jpeg"], accept_multiple_files=True)
 
-        left, right = st.columns([1, 2])
-        with left:
-            category = st.selectbox("자료 분류", CATEGORIES, index=0)
-        with right:
-            st.markdown(
-                f"""
-                <div style="background:#f5f7fb;border:1px solid #e3e7f3;padding:12px;border-radius:10px;margin-top:28px;">
-                🧾 <b>분류 설명</b><br>
-                {CATEGORY_INFO[category]}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    uploaded_files = st.file_uploader(
+        "파일 선택 (여러 개 가능)",
+        type=["pdf", "txt", "docx", "png", "jpg", "jpeg"],
+        accept_multiple_files=True
+    )
 
-        saved = st.form_submit_button("💾 선택한 파일 모두 저장하기")
+    def category_label(opt):
+        return f"{opt}  —  {CATEGORY_INFO[opt]}"
 
+    category = st.selectbox(
+        "자료 분류 (설명 포함)",
+        CATEGORIES,
+        index=0,
+        format_func=category_label
+    )
+
+    st.caption(f"🧾 선택된 분류 설명: {CATEGORY_INFO[category]}")
+
+    saved = st.form_submit_button("💾 선택한 파일 모두 저장하기")
+
+       
     if saved:
         if not uploaded_files:
             st.warning("파일을 선택해 주세요.")
