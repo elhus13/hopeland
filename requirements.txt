@@ -3,3 +3,4 @@ streamlit
 pandas
 openpyxl
 PyPDF2
+pinecone-client
