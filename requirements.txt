@@ -4,3 +4,6 @@ pandas
 openpyxl
 PyPDF2
 pinecone-client
+openai
+python-docx
+pillow
