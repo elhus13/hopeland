@@ -1,15 +1,12 @@
-# app.py
 import uuid
 import time
 import base64
-import io
 
 import streamlit as st
 import anthropic
 from openai import OpenAI
 from pinecone import Pinecone
 import docx
-from PIL import Image
 
 # PDF 텍스트 추출 (pypdf 권장)
 try:
@@ -25,17 +22,26 @@ st.set_page_config(page_title="NDTC Team HQ", page_icon="🏙️", layout="wide"
 
 
 # =========================
-# 1) 카테고리 (한 칸에 설명 포함)
+# 1) 카테고리 (지식 도서관 + 로그)
 # =========================
 CATEGORY_INFO = {
+    # 리서치/현황
     "기술현황(Tech Scan)": "기술/툴/프로토콜 조사, 요약, 비교 자료",
     "시장/경쟁(Benchmark)": "경쟁사/유사 프로젝트, 사례 비교",
     "규제/정책(Regulation)": "법/정책/규정/리스크 분석",
+
+    # 회의/공유
     "공유회의(Sharing Meeting)": "중간 조사 공유, 브레인스토밍, 논의 기록(결정 전)",
     "결정회의(Decision Meeting)": "무엇을 하기로 했다가 명확한 확정 회의 기록",
+
+    # 설계/산출물
     "설계/아키텍처(Architecture)": "구조도, 흐름, 데이터/결제/정산 설계 문서",
     "기획/문서(Planning Doc)": "제안서/피치덱/사업계획/로드맵 등 기획문서",
     "현장/증빙(Proof/Photos)": "사진/스캔/증빙/캡처 등 증거 자료",
+
+    # ✅ 로그(추가)
+    "대화 업무로그": "팀 공유용: 대화 결과/결론/요약/핵심 산출물 기록",
+    "대화 개인로그": "개인용: 접속 ID별 개인 기록(자동 분리 저장)",
 }
 CATEGORIES = list(CATEGORY_INFO.keys())
 
@@ -67,7 +73,7 @@ def login_screen():
                 st.session_state.logged_in = True
                 st.session_state.user_id = user_id
                 st.success(f"환영합니다, {user_id}님!")
-                time.sleep(0.4)
+                time.sleep(0.3)
                 st.rerun()
             else:
                 st.error("🚫 접근 승인이 거부되었습니다.")
@@ -79,7 +85,7 @@ if not st.session_state.logged_in:
 
 
 # =========================
-# 3) API 키 / 클라이언트 로드
+# 3) API 키 / 클라이언트
 # =========================
 st.sidebar.success(f"👤 접속자: {st.session_state.user_id}")
 st.title("🏙️ NDTC 디지털 본부 (Hopeland)")
@@ -101,8 +107,6 @@ oai = OpenAI(api_key=openai_key)
 
 # Pinecone
 pc = Pinecone(api_key=pinecone_key)
-
-# 인덱스 이름은 Secrets에서 바꾸기 쉽게
 INDEX_NAME = st.secrets.get("PINECONE_INDEX", "ndtc-memory")
 index = pc.Index(INDEX_NAME)
 
@@ -116,8 +120,11 @@ menu = st.sidebar.radio("업무 선택", ["AI 전략 비서 (Chat)", "지식 도
 # =========================
 # 5) 공통 유틸
 # =========================
+def category_label(opt: str) -> str:
+    return f"{opt} — {CATEGORY_INFO.get(opt, '')}"
+
+
 def safe_pdf_text(file_obj) -> str:
-    """PDF에서 텍스트 추출"""
     if PdfReader is None:
         return ""
     try:
@@ -133,7 +140,6 @@ def safe_pdf_text(file_obj) -> str:
 
 
 def docx_text(file_obj) -> str:
-    """DOCX 텍스트 추출"""
     try:
         d = docx.Document(file_obj)
         return "\n".join([p.text for p in d.paragraphs if p.text.strip()])
@@ -142,7 +148,6 @@ def docx_text(file_obj) -> str:
 
 
 def txt_text(file_obj) -> str:
-    """TXT 텍스트 추출"""
     try:
         return file_obj.read().decode("utf-8", errors="ignore")
     except Exception:
@@ -173,27 +178,28 @@ def image_to_text(uploaded_file) -> str:
 
 
 def make_embedding(text: str):
-    """텍스트 임베딩 생성"""
     resp = oai.embeddings.create(
         model="text-embedding-3-small",
-        input=text[:8000],  # 너무 길면 잘라서
+        input=text[:8000],
     )
     return resp.data[0].embedding
 
 
-def upsert_to_pinecone(*, vector, filename, category, raw_text):
-    """Pinecone에 저장"""
-    doc_id = str(uuid.uuid4())  # 안전한 ID
+def upsert_text(*, text: str, category: str, filename: str, owner: str | None = None):
+    """Pinecone에 텍스트 저장 (업무로그/개인로그/문서 모두 공용)"""
+    vec = make_embedding(text)
+    doc_id = str(uuid.uuid4())
     index.upsert(
         vectors=[
             {
                 "id": doc_id,
-                "values": vector,
+                "values": vec,
                 "metadata": {
                     "uploader": st.session_state.user_id,
+                    "owner": owner,  # 개인로그는 owner에 user_id 저장
                     "filename": filename,
                     "category": category,
-                    "text": raw_text[:2000],  # metadata 용량 고려
+                    "text": text[:2000],
                     "created_at": int(time.time()),
                 },
             }
@@ -202,25 +208,45 @@ def upsert_to_pinecone(*, vector, filename, category, raw_text):
     return doc_id
 
 
+def extract_text_from_upload(uploaded_file) -> str:
+    """첨부 파일에서 텍스트 추출(문서/이미지)"""
+    raw_text = ""
+    ext = uploaded_file.name.split(".")[-1].lower()
+
+    if ext == "pdf":
+        raw_text = safe_pdf_text(uploaded_file)
+        if not raw_text.strip():
+            raw_text = "(PDF 텍스트 추출 실패: 스캔 PDF일 수 있습니다.)"
+
+    elif ext == "docx":
+        raw_text = docx_text(uploaded_file)
+
+    elif ext == "txt":
+        raw_text = txt_text(uploaded_file)
+
+    elif ext in ["png", "jpg", "jpeg"]:
+        raw_text = image_to_text(uploaded_file)
+
+    return raw_text.strip()
+
+
 # =========================
 # 6) AI 전략 비서 (Chat)
 # =========================
 if menu == "AI 전략 비서 (Chat)":
     st.header("🤖 NDTC 수석 전략가 '엘투르'")
 
+    # ✅ Claude 최신 모델 (Opus 4.6)
+    # Anthropic Docs 기준: claude-opus-4-6  (Claude 3 Opus 은퇴 대체)
+    CLAUDE_MODEL = st.secrets.get("CLAUDE_MODEL", "claude-opus-4-6")
+
     system_context = """
 당신은 'NDTC(No Dealer Trading City Center)'의 수석 AI 전략가이자, 엘후스님의 개인 비서 '엘투르'입니다.
 
-[우리의 핵심 사업]
-1. 프로젝트명: 리플(XRP) 기반 글로벌 유통 도시 건설 및 플랫폼 구축
-2. 목표: 블록체인과 AI 기술을 활용한 물류/유통 혁신 도시 설계
-3. 핵심 기술: XRP Ledger, 자체 토큰(유틸리티) 발행 및 상장, RWA 발행
-4. 현재 상태: 학습 및 기획 단계
-
-[당신의 역할]
-1. 교육자: 기술 개념을 쉽게 설명
-2. 분석가: 업로드 자료 분석 및 적용점 제안
-3. 파트너: 무조건적 응원보다 객관적 분별 제공
+[역할]
+- 개념을 쉽게 설명(교육자)
+- 자료를 분석하고 적용점을 제안(분석가)
+- 객관적 분별 제공(파트너)
 
 [규칙]
 - 내부 자료가 있으면 우선 근거로 사용
@@ -230,23 +256,46 @@ if menu == "AI 전략 비서 (Chat)":
     if "messages" not in st.session_state:
         st.session_state.messages = [{"role": "assistant", "content": "엘투르입니다. 오늘은 어떤 전략을 논의할까요?"}]
 
+    # ✅ 첨부(➕) 영역: 대화와 함께 파일/이미지 추가
+    with st.expander("➕ 첨부 파일/이미지 추가 (질문과 함께 분석해서 반영)", expanded=False):
+        chat_files = st.file_uploader(
+            "여기에 파일/이미지를 추가하세요 (여러 개 가능)",
+            type=["pdf", "txt", "docx", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key="chat_files",
+        )
+        st.caption("※ Streamlit 기본 채팅 입력창에는 내장 +버튼이 없어, 이 '첨부 영역'으로 동일 기능을 제공합니다.")
+
+    # 대화 표시
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
     prompt = st.chat_input("질문하거나 명령을 내려주세요...")
+
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # RAG 검색
+        # 1) 첨부 텍스트 추출
+        attachment_summary = ""
+        if chat_files:
+            chunks = []
+            for f in chat_files:
+                t = extract_text_from_upload(f)
+                if t:
+                    chunks.append(f"[첨부파일: {f.name}]\n{t[:2000]}")
+            if chunks:
+                attachment_summary = "\n\n".join(chunks)
+
+        # 2) RAG 검색(전체 지식에서 top_k)
         knowledge_text = ""
         sources = []
-
         try:
-            q_vec = make_embedding(prompt)
-            res = index.query(vector=q_vec, top_k=3, include_metadata=True)
+            q_vec = make_embedding(prompt + ("\n" + attachment_summary if attachment_summary else ""))
+            res = index.query(vector=q_vec, top_k=4, include_metadata=True)
+
             for match in res.get("matches", []):
                 score = match.get("score", 0)
                 meta = match.get("metadata", {}) or {}
@@ -256,24 +305,28 @@ if menu == "AI 전략 비서 (Chat)":
         except Exception:
             pass
 
+        # 3) 최종 프롬프트 구성
         final_prompt = f"""{prompt}
+
+[첨부자료(사용자 제공)]
+{attachment_summary if attachment_summary else "없음"}
 
 [참고할 우리 팀 내부 자료]
 {knowledge_text if knowledge_text.strip() else "관련된 내부 자료가 없습니다. 일반 지식으로 답변하세요."}
 """
 
+        # 4) Claude 호출
         with st.chat_message("assistant"):
             try:
                 resp = anthropic_client.messages.create(
-                    model="claude-3-haiku-20240307",
+                    model=CLAUDE_MODEL,
                     max_tokens=2000,
                     system=system_context,
-                    messages=[
-                        {"role": "user", "content": final_prompt}
-                    ],
+                    messages=[{"role": "user", "content": final_prompt}],
                 )
                 answer = resp.content[0].text
 
+                # 출처 표시
                 if sources:
                     uniq = []
                     for s in sources:
@@ -283,6 +336,34 @@ if menu == "AI 전략 비서 (Chat)":
 
                 st.markdown(answer)
                 st.session_state.messages.append({"role": "assistant", "content": answer})
+
+                # ✅ 저장 선택 UI (팀/개인 선택 후 저장)
+                st.markdown("---")
+                colA, colB = st.columns([2, 1])
+
+                with colA:
+                    save_target = st.selectbox(
+                        "저장 위치 선택",
+                        ["저장 안함", "대화 업무로그", "대화 개인로그"],
+                        index=0,
+                        key=f"save_target_{int(time.time())}",
+                    )
+                    st.caption("‘대화 개인로그’는 접속한 아이디별로 자동 분리 저장됩니다.")
+
+                with colB:
+                    if st.button("💾 지금 결과 저장", key=f"save_btn_{int(time.time())}"):
+                        if save_target == "저장 안함":
+                            st.warning("저장 위치를 선택해 주세요.")
+                        else:
+                            owner = st.session_state.user_id if save_target == "대화 개인로그" else None
+                            upsert_text(
+                                text=f"user: {prompt}\n\nassistant: {answer}",
+                                category=save_target,
+                                filename=f"{save_target}_{st.session_state.user_id}_{int(time.time())}.txt",
+                                owner=owner,
+                            )
+                            st.success(f"✅ '{save_target}'로 저장했습니다.")
+
             except Exception as e:
                 st.error(f"오류가 발생했습니다: {e}")
 
@@ -293,9 +374,6 @@ if menu == "AI 전략 비서 (Chat)":
 elif menu == "지식 도서관 (자료 저장)":
     st.header("📚 NDTC 지식 저장소")
     st.info("여러 파일을 한 번에 선택하고, 같은 카테고리로 일괄 저장할 수 있습니다.")
-
-    def category_label(opt: str) -> str:
-        return f"{opt} — {CATEGORY_INFO.get(opt, '')}"
 
     with st.form("upload_form", clear_on_submit=False):
         uploaded_files = st.file_uploader(
@@ -321,47 +399,27 @@ elif menu == "지식 도서관 (자료 저장)":
 
         ok_count, fail_count = 0, 0
 
-        for uploaded_file in uploaded_files:
-            with st.spinner(f"저장 중: {uploaded_file.name}"):
+        for f in uploaded_files:
+            with st.spinner(f"저장 중: {f.name}"):
                 try:
-                    raw_text = ""
-                    ext = uploaded_file.name.split(".")[-1].lower()
-
-                    # 문서 처리
-                    if ext == "pdf":
-                        raw_text = safe_pdf_text(uploaded_file)
-                        if not raw_text.strip():
-                            raw_text = "(PDF 텍스트 추출 실패: 스캔 PDF일 수 있습니다.)"
-
-                    elif ext == "docx":
-                        raw_text = docx_text(uploaded_file)
-
-                    elif ext == "txt":
-                        raw_text = txt_text(uploaded_file)
-
-                    # 이미지 처리(비전)
-                    elif ext in ["png", "jpg", "jpeg"]:
-                        raw_text = image_to_text(uploaded_file)
-                        if raw_text.strip():
-                            st.info(f"🖼️ 이미지 분석 요약: {raw_text[:120]}...")
-
-                    if not raw_text.strip():
+                    raw_text = extract_text_from_upload(f)
+                    if not raw_text:
                         fail_count += 1
-                        st.warning(f"내용을 읽을 수 없어 저장하지 못했습니다: {uploaded_file.name}")
+                        st.warning(f"내용을 읽을 수 없어 저장하지 못했습니다: {f.name}")
                         continue
 
-                    vec = make_embedding(raw_text)
-                    upsert_to_pinecone(
-                        vector=vec,
-                        filename=uploaded_file.name,
+                    # 지식 도서관 저장은 owner 없음(공유)
+                    upsert_text(
+                        text=raw_text,
                         category=category,
-                        raw_text=raw_text,
+                        filename=f.name,
+                        owner=None,
                     )
                     ok_count += 1
 
                 except Exception as e:
                     fail_count += 1
-                    st.error(f"업로드 실패: {uploaded_file.name} / {e}")
+                    st.error(f"업로드 실패: {f.name} / {e}")
 
         st.success(f"✅ 저장 완료! 성공 {ok_count}개 / 실패 {fail_count}개")
 
