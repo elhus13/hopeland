@@ -3,7 +3,7 @@ streamlit
 pandas
 openpyxl
 PyPDF2
-pinecone-client
+pinecone
 openai
 python-docx
 pillow
