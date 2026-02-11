@@ -1,3 +1,4 @@
+import uuid
 import streamlit as st
 import anthropic
 import openai
@@ -222,28 +223,30 @@ elif menu == "지식 도서관 (자료 저장)":
                         )
                         raw_text = vision_resp.choices[0].message.content
                         st.info(f"🖼️ 이미지 분석 내용: {raw_text[:100]}...")
-
+                    
                     # 3) 임베딩 & 저장 (공통)
                     if raw_text:
-                        emb_resp = openai.embeddings.create(input=raw_text[:8000], model="text-embedding-3-small")
-                        vector = emb_resp.data[0].embedding
-                        
-                        doc_id = f"{uploaded_file.name}_{int(time.time())}"
-                        
-                        # Pinecone 저장
-                        index.upsert(vectors=[{
-                            "id": doc_id, 
-                            "values": vector, 
-                            "metadata": {
-                                "uploader": st.session_state.user_id,
-                                "filename": uploaded_file.name,
-                                "category": category,
-                                "text": raw_text[:2000] # 메타데이터 용량 제한 고려
-                            }
-                        }])
-                        st.success(f"✅ 저장 완료! 이제 엘투르가 이 내용을 기억합니다.")
-                    else:
-                        st.warning("파일에서 내용을 읽을 수 없습니다.")
+                       emb_resp = openai.embeddings.create(
+                           input=raw_text[:8000],
+                           model="text-embedding-3-small"
+                       )
+                      vector = emb_resp.data[0].embedding
+
+                      doc_id = str(uuid.uuid4())  # 🟩 핵심: 한글 파일명 대신 안전한 ID 사용
+
+                      index.upsert([
+                         (doc_id, vector, {
+                           "uploader": st.session_state.user_id,
+                           "filename": uploaded_file.name,   # 파일명은 metadata에 보관
+                           "category": category,
+                           "text": raw_text[:2000]
+                       })
+                   ])
+
+                   st.success("✅ 저장 완료! 이제 엘투르가 이 내용을 기억합니다.")
+             else:
+               st.warning("파일에서 내용을 읽을 수 없습니다.")
+  
                         
                 except Exception as e:
                     st.error(f"업로드 실패: {e}")
