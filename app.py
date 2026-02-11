@@ -162,7 +162,7 @@ def get_full_response(messages, system_prompt):
     for i in range(max_rounds):
         response = claude.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=4096,
+            max_tokens=8192,
             system=system_prompt,
             messages=working_messages
         )
