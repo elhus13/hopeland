@@ -148,6 +148,44 @@ def make_embedding(text: str):
     )
     return resp.data[0].embedding
 
+# =========================================================
+# 5-b) 공통 유틸: Claude 응답 이어받기 (Auto-continue)
+# =========================================================
+def get_full_response(messages, system_prompt):
+    """응답이 max_tokens에 의해 잘리면 자동으로 이어서 받아오는 함수"""
+    full_text = ""
+    max_rounds = 3  # 최대 3번까지 이어받기
+
+    # 원본 messages를 훼손하지 않도록 복사본 사용
+    working_messages = [m.copy() for m in messages]
+
+    for i in range(max_rounds):
+        response = claude.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            system=system_prompt,
+            messages=working_messages
+        )
+
+        chunk = response.content[0].text
+        full_text += chunk
+
+        # stop_reason 확인
+        # "end_turn" = 정상 완료 / "max_tokens" = 잘림
+        if response.stop_reason == "end_turn":
+            break
+
+        # 잘린 경우 → "이어서 작성해줘"를 자동 추가
+        working_messages.append({"role": "assistant", "content": chunk})
+        working_messages.append({
+            "role": "user",
+            "content": "이어서 작성해줘. 끊긴 부분부터 자연스럽게 계속."
+        })
+
+    return full_text
+
+
+
 
 # =========================================================
 # 6) Pinecone 저장(카테고리/로그 구분)
@@ -376,7 +414,7 @@ if menu == "AI 전략 비서 (Chat)":
                 # Anthropic messages API 형식
                 resp = claude.messages.create(
                     model="claude-opus-4-6",
-                    max_tokens=2000,
+                    max_tokens=4096,
                     system=system_context,
                     messages=[
                         {"role": "user", "content": final_prompt}
