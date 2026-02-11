@@ -414,7 +414,7 @@ if menu == "AI 전략 비서 (Chat)":
                 # Anthropic messages API 형식
                 resp = claude.messages.create(
                     model="claude-opus-4-6",
-                    max_tokens=4096,
+                    max_tokens=8192,
                     system=system_context,
                     messages=[
                         {"role": "user", "content": final_prompt}
